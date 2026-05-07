@@ -1,10 +1,39 @@
 ---
-title: "Diary"
-status: active
-intent: long-term
-topics: [go, bubbletea, glazed, tui, networking]
-created: 2026-05-07
+Title: ""
+Ticket: ""
+Status: ""
+Topics: []
+DocType: ""
+Intent: ""
+Owners: []
+RelatedFiles:
+    - Path: cmd/listen-killer/cmds/tui/tui.go
+      Note: Glazed command with TUI/CLI dual mode
+    - Path: cmd/listen-killer/main.go
+      Note: Cobra root + Glazed wiring
+    - Path: pkg/listener/process.go
+      Note: KillProcess with signal selection
+    - Path: pkg/listener/scanner.go
+      Note: TCP listener scanner using gopsutil
+    - Path: pkg/listener/types.go
+      Note: ListenerInfo struct + formatting helpers
+    - Path: pkg/tui/keymap.go
+      Note: 14 key bindings
+    - Path: pkg/tui/model.go
+      Note: Bubbletea Model + Init + commands
+    - Path: pkg/tui/styles.go
+      Note: Lipgloss theme
+    - Path: pkg/tui/update.go
+      Note: Update handler for 3 modes (table/detail/kill)
+    - Path: pkg/tui/view.go
+      Note: View rendering for all modes
+ExternalSources: []
+Summary: ""
+LastUpdated: 0001-01-01T00:00:00Z
+WhatFor: ""
+WhenToUse: ""
 ---
+
 
 # Diary
 
@@ -75,5 +104,93 @@ Scaffolding the Go module, directory structure, and pulling in all dependencies.
 ### Technical details
 - lsof-who reference: `/home/manuel/code/wesen/corporate-headquarters/go-go-labs/cmd/apps/lsof-who/main.go`
 - bobatea reference: `/home/manuel/code/wesen/go-go-golems/bobatea/`
-- bubble-table reference: `/home/manuel/code/wesen/go-go-golems/bubble-table/`
+- bubble-table reference: `/home/manuel/code/wesen/go-go-golems/bubble-table/` (not used — incompatible bubbletea versions; used `bubbles/table` instead)
 - Glazed tutorial: `/home/manuel/code/wesen/corporate-headquarters/glazed/pkg/doc/tutorials/05-build-first-command.md`
+
+## Step 2: Full Implementation — Data Layer, TUI Layer, and CLI Layer
+
+Built all three layers of the application: data gathering (pkg/listener/), Bubbletea TUI (pkg/tui/), and Glazed CLI wrapper (cmd/listen-killer/). Compiled, tested CLI mode and TUI mode in tmux.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 1)
+
+**Assistant interpretation:** Implement the full app, test CLI output and TUI rendering, verify kill flow with a dummy listener.
+
+**Commit (code):** `0b66d13` — "Initial implementation of Listen Killer"
+**Commit (code):** `8b3b78a` — "TUI verified working in tmux"
+
+### What I did
+- **Data layer** (`pkg/listener/`):
+  - `types.go`: `ListenerInfo` struct with 13 fields, `FormatUptime()` for human-readable duration, `FormatBytes()` for memory display
+  - `scanner.go`: `ScanListeners()` using `gopsutil/net.Connections("inet")`, filters TCP LISTEN, calls `gatherProcessInfo()`
+  - `process.go`: `KillProcess()` using `syscall.Kill()` with TERM/KILL/INT signal selection
+- **TUI layer** (`pkg/tui/`):
+  - `keymap.go`: 14 key bindings with vim-style navigation (j/k), kill (K), refresh (r), filter (/), auto-refresh (a), detail (enter), help (?)
+  - `styles.go`: lipgloss theme with blue title bar, gray footer, red danger styling for kill actions
+  - `model.go`: `Model` struct with three modes (table, detail, kill dialog), custom messages (ListenersLoadedMsg, KillConfirmedMsg, KillResultMsg, RefreshTickMsg)
+  - `update.go`: full message handling for all three modes, auto-refresh tick loop
+  - `view.go`: title bar, table view, detail overlay (shows all 10 fields), kill confirmation dialog with signal selector
+- **CLI layer** (`cmd/listen-killer/`):
+  - `cmds/tui/tui.go`: `ListCommand` implementing `GlazeCommand` interface, dual-mode: TUI (when TTY detected or `--tui`) or CLI (Glazed rows with `--output json/table/csv`)
+  - `main.go`: root Cobra command with Glazed logging, help system, default `list` subcommand when no args
+
+### Why
+- Used `bubbles/table` (charmbracelet) instead of `bubble-table` (evertras/go-go-golems) because bubble-table uses ancient bubbletea v0.21.0 incompatible with our v1.3.10
+- Used `huh` for nothing — built custom kill dialog with lipgloss to avoid adding another dependency and keep the kill flow inline with the table navigation
+- Three-mode state machine (table/detail/kill) keeps the UX clean without popup windows
+
+### What worked
+- Scanner correctly found all 9 TCP listeners on the system (Discord, Obsidian, md-view ×5, web-chat ×2)
+- CLI mode with `--no-tui --output json` and `--no-tui --output table` both work
+- TUI mode renders correctly in tmux with title bar, scrollable table, footer key bindings
+- Auto-refresh works; manual refresh (r) works
+- Kill flow via CLI: confirmed process removed from scan after `kill -TERM`
+
+### What didn't work
+- TUI kill dialog not testable non-interactively (key simulation via stdin doesn't work with Bubbletea)
+- `script` command capture was misleading — table rows didn't appear in capture but work fine in real tmux
+- Default action (`listen-killer` without args → TUI) required careful `os.Args` manipulation to avoid infinite recursion
+
+### What I learned
+- `bubbles/table` v1.0.0 `SetRows` calls `UpdateViewport` internally — setting viewport height first is critical
+- `tea.EnterAltScreen` is a command that returns no message; WindowSizeMsg arrives separately
+- Glazed's `cli.BuildCobraCommand` returns a cobra.Command with `RunE` already set; overriding it on the parent requires care
+- `gopsutil.Process.Percent(0)` returns 0 on first call (needs two samples); CPU% column stays empty in our first scan
+
+### What was tricky to build
+- The `bubbles/table` viewport defaults to height 0 unless `WithHeight()` is used in constructor
+- IPv6 addresses show as "::" from gopsutil — normalized to "*" for display
+- The cmdline field from `/proc/pid/cmdline` is absurdly long for Chromium-based processes (Discord, Obsidian) — we truncate via table column width
+- Glazed's `WithSections` is variadic, not `WithSectionsList` — the compiled error was easy to fix but unexpected
+
+### What warrants a second pair of eyes
+- Auto-refresh tick goroutine — ensure it doesn't leak; the `tea.Tick` is properly chained via `tea.Batch` but verify cancellation on quit
+- Kill via `syscall.Kill` — should check process ownership to prevent killing system processes
+- The `os.Args` manipulation for default subcommand is fragile; consider cobra's `TraverseRunHooks` or a custom `DisableDefaultCommand` pattern
+
+### What should be done in the future
+- Add process ownership check before allowing kill (only allow killing own processes + sudo)
+- Add UDP listener support
+- Add `--watch` / streaming mode with event-based refresh
+- Add process tree view (like lsof-who's parent chain)
+
+### Code review instructions
+- Start with `pkg/listener/scanner.go` → `pkg/tui/model.go` → `pkg/tui/update.go` → `cmd/listen-killer/main.go`
+- Verify kill flow: `pkg/listener/process.go` → `pkg/tui/update.go:updateKill()`
+- Test with: `go build ./cmd/listen-killer/ && ./listen-killer` (needs real TTY)
+- Verify CLI: `./listen-killer list --no-tui --output json | jq '.[0]'`
+
+### Technical details
+- Binary installed at: `/home/manuel/.local/bin/listen-killer`
+- All source files:
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/listener/types.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/listener/scanner.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/listener/process.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/keymap.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/styles.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/model.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/update.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/view.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/cmd/listen-killer/main.go`
+  - `/home/manuel/code/wesen/2026-05-07--listen-killer/cmd/listen-killer/cmds/tui/tui.go`
