@@ -253,3 +253,34 @@ The user reported that keys don't work in the TUI. Root cause: two critical bugs
 ### Technical details
 - bubbles/table v1.0.0 default keymap: up/k=LineUp, down/j=LineDown, b/pgup=PageUp, f/pgdn=PageDown, u/ctrl+u=HalfPageUp, d/ctrl+d=HalfPageDown, home/g=GotoTop, end/G=GotoBottom
 - These keys MUST reach `table.Update()` for navigation to work
+
+## Step 4: Multi-mark, Detail Pane, and Open-in-Browser
+
+Added three new features requested by the user.
+
+### Prompt Context
+
+**User prompt (verbatim):** "allow marking multiple services. Add a detail pane. add a key to open a browser to that port / address"
+
+**Commit (code):** `8008f60` — "Add multi-mark, detail pane, and open-in-browser features"
+
+### What I did
+- **Multi-mark**: Spacebar toggles mark (●) on current row. M clears all marks. Marks auto-advance cursor down for rapid marking. Kill dialog supports bulk kill of marked PIDs via `tea.Batch`.
+- **Detail pane**: `d` toggles split-pane view — table left, detail right with `│` separator. Shows all 11 fields including computed URL. Auto-updates on cursor movement.
+- **Open in browser**: `o` opens `http://host:port` via `xdg-open` (Linux) or `open` (macOS). Normalizes bind addresses (0.0.0.0/* → 127.0.0.1).
+
+### What worked
+- Multi-kill end-to-end: marked 2 python3 test processes, K → y → both killed, 10→8 listeners
+- Detail pane: split view renders correctly, auto-updates on j/k navigation
+- Browser: "Opened http://127.0.0.1:18081" confirmed in status bar
+
+### What was tricky to build
+- Row conversion needed to go from a free function to a method on Model (to access `m.marked`)
+- The `selectedListener()` helper extracts the PID from the table's SelectedRow and looks it up in `m.listeners` — this bridges the table widget's string-based API with our typed data
+- Browser URL construction: bind address 0.0.0.0 or * means "all interfaces" — normalize to 127.0.0.1 for browser
+
+### What should be done in the future
+- Add `enter` as alternative to `o` for browser open (common convention)
+- Implement `/` filter feature
+- Add scrolling in detail pane for long cmdlines
+- Consider showing open files count in detail pane (like lsof-who)
