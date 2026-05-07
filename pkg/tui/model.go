@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -16,27 +18,23 @@ import (
 // Custom messages
 // ---------------------------------------------------------------------------
 
-// ListenersLoadedMsg is sent when a scan completes.
 type ListenersLoadedMsg struct {
 	Listeners []listener.ListenerInfo
 	Err       error
 }
 
-// KillConfirmedMsg is sent when the user confirms a kill action.
-type KillConfirmedMsg struct {
-	PID    int32
-	Signal string
-}
-
-// KillResultMsg is sent after attempting to kill a process.
 type KillResultMsg struct {
 	PID    int32
 	Signal string
 	Err    error
 }
 
-// RefreshTickMsg is sent by the auto-refresh timer.
 type RefreshTickMsg time.Time
+
+type BrowserOpenedMsg struct {
+	URL string
+	Err error
+}
 
 // ---------------------------------------------------------------------------
 // View modes
@@ -45,40 +43,37 @@ type RefreshTickMsg time.Time
 type viewMode int
 
 const (
-	modeTable  viewMode = iota // showing the listener table
-	modeDetail                 // showing detail for one process
-	modeKill                   // showing kill confirmation
+	modeTable viewMode = iota
+	modeKill
 )
 
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
-// Model is the top-level Bubbletea model for the Listen Killer TUI.
 type Model struct {
-	// Data
 	listeners []listener.ListenerInfo
 
-	// Components
-	table      table.Model
-	help       help.Model
-	keys       KeyMap
-	styles     Styles
+	table  table.Model
+	help   help.Model
+	keys   KeyMap
+	styles Styles
 
-	// UI state
-	width       int
-	height      int
-	ready       bool
-	loading     bool
-	mode        viewMode
-	selectedIdx int
+	width   int
+	height  int
+	ready   bool
+	loading bool
+	mode    viewMode
 
-	// Detail view state
-	detailInfo *listener.ListenerInfo
+	// Multi-mark: set of marked PIDs
+	marked map[int32]bool
+
+	// Detail pane: toggled with 'd', shows the row under the cursor
+	showDetail bool
 
 	// Kill dialog state
-	killPID     int32
-	killName    string
+	killPIDs    []int32
+	killNames   []string
 	killSignal  string
 	killSignals []string
 	killIdx     int
@@ -94,14 +89,15 @@ type Model struct {
 // NewModel creates a new Model in loading state.
 func NewModel() Model {
 	columns := []table.Column{
+		{Title: "●", Width: 1},
 		{Title: "PID", Width: 7},
-		{Title: "Process", Width: 18},
-		{Title: "User", Width: 10},
+		{Title: "Process", Width: 16},
+		{Title: "User", Width: 8},
 		{Title: "Port", Width: 6},
-		{Title: "Address", Width: 18},
-		{Title: "Uptime", Width: 10},
-		{Title: "CPU%", Width: 7},
-		{Title: "Memory", Width: 10},
+		{Title: "Address", Width: 14},
+		{Title: "Uptime", Width: 8},
+		{Title: "CPU%", Width: 6},
+		{Title: "Memory", Width: 9},
 	}
 
 	t := table.New(
@@ -123,15 +119,14 @@ func NewModel() Model {
 		Bold(true)
 	t.SetStyles(s)
 
-	keys := NewKeyMap()
-
 	return Model{
 		table:          t,
 		help:           help.New(),
-		keys:           keys,
+		keys:           NewKeyMap(),
 		styles:         DefaultStyles(),
 		loading:        true,
 		mode:           modeTable,
+		marked:         make(map[int32]bool),
 		killSignal:     "TERM",
 		killSignals:    []string{"TERM", "KILL", "INT"},
 		killIdx:        0,
@@ -140,24 +135,17 @@ func NewModel() Model {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Init
-// ---------------------------------------------------------------------------
-
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
-		m.loadListeners(),
-		tea.EnterAltScreen,
-	)
+	return tea.Batch(m.loadListeners(), tea.EnterAltScreen)
 }
 
 // ---------------------------------------------------------------------------
-// Row conversion
+// Row conversion — includes mark column (●)
 // ---------------------------------------------------------------------------
 
-func listenersToRows(listeners []listener.ListenerInfo) []table.Row {
-	rows := make([]table.Row, len(listeners))
-	for i, l := range listeners {
+func (m Model) listenersToRows() []table.Row {
+	rows := make([]table.Row, len(m.listeners))
+	for i, l := range m.listeners {
 		addr := l.Address
 		if addr == "" || addr == "::" {
 			addr = "*"
@@ -166,8 +154,12 @@ func listenersToRows(listeners []listener.ListenerInfo) []table.Row {
 		if l.CPUPercent > 0 {
 			cpu = fmt.Sprintf("%.1f", l.CPUPercent)
 		}
-
+		mark := " "
+		if m.marked[l.PID] {
+			mark = "●"
+		}
 		rows[i] = table.Row{
+			mark,
 			fmt.Sprintf("%d", l.PID),
 			l.Name,
 			l.Username,
@@ -182,6 +174,38 @@ func listenersToRows(listeners []listener.ListenerInfo) []table.Row {
 }
 
 // ---------------------------------------------------------------------------
+// Get ListenerInfo for the currently selected table row
+// ---------------------------------------------------------------------------
+
+func (m Model) selectedListener() *listener.ListenerInfo {
+	row := m.table.SelectedRow()
+	if len(row) < 2 {
+		return nil
+	}
+	var pid int32
+	fmt.Sscanf(row[1], "%d", &pid)
+	for _, l := range m.listeners {
+		if l.PID == pid {
+			info := l
+			return &info
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Build a browser URL from a ListenerInfo
+// ---------------------------------------------------------------------------
+
+func listenerURL(l *listener.ListenerInfo) string {
+	host := l.Address
+	if host == "" || host == "*" || host == "::" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	}
+	return fmt.Sprintf("http://%s:%d", host, l.Port)
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -192,10 +216,41 @@ func (m Model) loadListeners() tea.Cmd {
 	}
 }
 
-func (m Model) killProcess(pid int32, signal string) tea.Cmd {
+func (m Model) killOne(pid int32, signal string) tea.Cmd {
 	return func() tea.Msg {
 		err := listener.KillProcess(pid, signal)
 		return KillResultMsg{PID: pid, Signal: signal, Err: err}
+	}
+}
+
+func killMarked(pids []int32, signal string) tea.Cmd {
+	cmds := make([]tea.Cmd, len(pids))
+	for i, pid := range pids {
+		p := pid // capture
+		cmds[i] = func() tea.Msg {
+			err := listener.KillProcess(p, signal)
+			return KillResultMsg{PID: p, Signal: signal, Err: err}
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func openBrowserCmd(url string) tea.Cmd {
+	return func() tea.Msg {
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "linux":
+			cmd = exec.Command("xdg-open", url)
+		case "darwin":
+			cmd = exec.Command("open", url)
+		default:
+			return BrowserOpenedMsg{URL: url, Err: fmt.Errorf("unsupported OS: %s", runtime.GOOS)}
+		}
+		err := cmd.Start()
+		if err != nil {
+			return BrowserOpenedMsg{URL: url, Err: err}
+		}
+		return BrowserOpenedMsg{URL: url, Err: nil}
 	}
 }
 
