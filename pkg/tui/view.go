@@ -40,7 +40,7 @@ func (m Model) View() string {
 	if m.mode == modeKill {
 		body = m.renderKillOverlay()
 	} else if m.showDetail {
-		body = m.renderSplitPane()
+		body = m.renderVerticalSplit()
 	} else {
 		body = m.renderTable()
 	}
@@ -65,34 +65,29 @@ func (m Model) renderTable() string {
 }
 
 // ---------------------------------------------------------------------------
-// Split pane: table on left, detail on right
+// Vertical split: table on top, detail pane below
 // ---------------------------------------------------------------------------
 
-func (m Model) renderSplitPane() string {
-	// Left: table (already sized to half width by Update)
+func (m Model) renderVerticalSplit() string {
 	tableView := m.renderTable()
-
-	// Right: detail pane for the currently selected row
 	detailView := m.renderDetailPane()
-
-	// Join horizontally
-	gap := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("│")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top, tableView, gap, detailView)
+	separator := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render(strings.Repeat("─", m.width-2))
+	return lipgloss.JoinVertical(lipgloss.Left, tableView, separator, detailView)
 }
 
 // ---------------------------------------------------------------------------
-// Detail pane (right side)
+// Detail pane (below the table — full width, compact layout)
 // ---------------------------------------------------------------------------
 
 func (m Model) renderDetailPane() string {
 	info := m.selectedListener()
 	if info == nil {
 		return lipgloss.NewStyle().
-			Width(m.width/2 - 4).
-			Height(m.height - 6).
+			Height(10).
 			Foreground(lipgloss.Color("243")).
-			Render("\n  No selection")
+			Render("  No selection")
 	}
 
 	addr := info.Address
@@ -100,54 +95,75 @@ func (m Model) renderDetailPane() string {
 		addr = "*"
 	}
 
-	// Truncate long cmdlines
 	cmdline := info.Cmdline
-	if len(cmdline) > 60 {
-		cmdline = cmdline[:57] + "..."
+	if len(cmdline) > 80 {
+		cmdline = cmdline[:77] + "..."
 	}
 
-	// Truncate long exe paths
 	exe := info.Exe
-	if len(exe) > 60 {
-		exe = exe[:57] + "..."
+	if len(exe) > 80 {
+		exe = exe[:77] + "..."
 	}
 
-	// Browser URL
 	url := listenerURL(info)
 
-	rows := []string{
-		m.renderKV("PID", fmt.Sprintf("%d", info.PID)),
-		m.renderKV("Name", info.Name),
-		m.renderKV("Cmdline", cmdline),
-		m.renderKV("Binary", exe),
-		m.renderKV("User", info.Username),
-		m.renderKV("Port", fmt.Sprintf("%d (%s)", info.Port, info.Protocol)),
-		m.renderKV("Address", addr),
-		m.renderKV("Uptime", info.Uptime),
-		m.renderKV("CPU %", fmt.Sprintf("%.1f", info.CPUPercent)),
-		m.renderKV("Memory", info.RSSHuman),
-		m.renderKV("URL", url),
-	}
+	label := m.styles.DetailLabel
+	value := m.styles.DetailValue
 
-	title := m.styles.DetailTitle.Render(fmt.Sprintf("%d — %s", info.PID, info.Name))
-	body := strings.Join(rows, "\n")
+	// Row 1: core identity
+	line1 := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("PID"), value.Render(fmt.Sprintf("%-8d", info.PID)),
+		label.Render("Name"), value.Render(fmt.Sprintf("%-20s", info.Name)),
+		label.Render("User"), value.Render(fmt.Sprintf("%-10s", info.Username)),
+		label.Render("Uptime"), value.Render(info.Uptime),
+	)
 
-	// Mark indicator
-	markLine := ""
+	// Row 2: network
+	line2 := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("Port"), value.Render(fmt.Sprintf("%-8d", info.Port)),
+		label.Render("Address"), value.Render(fmt.Sprintf("%-18s", addr)),
+		label.Render("CPU"), value.Render(fmt.Sprintf("%-8s", fmt.Sprintf("%.1f%%", info.CPUPercent))),
+		label.Render("Memory"), value.Render(info.RSSHuman),
+	)
+
+	// Row 3: binary
+	line3 := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("Binary"), value.Render(exe),
+	)
+
+	// Row 4: cmdline
+	line4 := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("Cmd"), value.Render(cmdline),
+	)
+
+	// Row 5: URL + marks
+	urlLine := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("URL"), value.Render(url),
+	)
 	if m.marked[info.PID] {
-		markLine = "\n" + m.styles.StatusDanger.Render("● MARKED")
+		urlLine = lipgloss.JoinHorizontal(lipgloss.Left,
+			urlLine,
+			"  ",
+			m.styles.StatusDanger.Render("● MARKED"),
+		)
 	}
 
-	actions := "\n\n" + m.styles.DetailLabel.Render("[K] Kill  [o] Open  [space] Mark")
+	// Header with process title
+	header := m.styles.DetailTitle.Render(fmt.Sprintf("%d — %s", info.PID, info.Name))
 
-	paneWidth := m.width/2 - 6
-	if paneWidth < 20 {
-		paneWidth = 20
-	}
+	detail := lipgloss.NewStyle().
+		Width(m.width - 4).
+		Padding(0, 1).
+		Render(lipgloss.JoinVertical(lipgloss.Left,
+			header,
+			line1,
+			line2,
+			line3,
+			line4,
+			urlLine,
+		))
 
-	content := title + "\n\n" + body + markLine + actions
-
-	return m.styles.DetailView.Width(paneWidth).Render(content)
+	return detail
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +173,6 @@ func (m Model) renderDetailPane() string {
 func (m Model) renderKillOverlay() string {
 	title := m.styles.DialogTitle.Render("⚠ Kill Process")
 
-	// Build target description
 	var target string
 	if len(m.killPIDs) == 1 {
 		target = fmt.Sprintf("PID %d — %s", m.killPIDs[0], m.killNames[0])
@@ -169,7 +184,6 @@ func (m Model) renderKillOverlay() string {
 		}
 	}
 
-	// Signal selector
 	var signalLines []string
 	for i, sig := range m.killSignals {
 		prefix := "  "

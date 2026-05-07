@@ -132,6 +132,7 @@ func NewModel() Model {
 		killIdx:        0,
 		autoRefresh:    false,
 		refreshSeconds: 3,
+		showDetail:    true,
 	}
 }
 

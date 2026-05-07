@@ -21,13 +21,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// When detail pane is showing, table gets half the width
+		m.table.SetWidth(m.width - 2)
+		detailLines := 0
 		if m.showDetail {
-			m.table.SetWidth(m.width/2 - 4)
-		} else {
-			m.table.SetWidth(m.width - 2)
+			detailLines = 12
 		}
-		m.table.SetHeight(m.height - 6)
+		m.table.SetHeight(m.height - 5 - detailLines)
 		if !m.ready {
 			m.ready = true
 		}
@@ -184,9 +183,9 @@ func (m Model) handleTableKey(key string) (Model, bool, tea.Cmd) {
 	case "d":
 		m.showDetail = !m.showDetail
 		if m.showDetail {
-			m.table.SetWidth(m.width/2 - 4)
+			m.table.SetHeight(m.height - 5 - 12)
 		} else {
-			m.table.SetWidth(m.width - 2)
+			m.table.SetHeight(m.height - 5)
 		}
 		m.statusMsg = "Detail pane: "
 		if m.showDetail {
