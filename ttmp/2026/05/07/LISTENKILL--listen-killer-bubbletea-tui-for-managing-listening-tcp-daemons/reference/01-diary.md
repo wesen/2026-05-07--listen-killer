@@ -194,3 +194,62 @@ Built all three layers of the application: data gathering (pkg/listener/), Bubbl
   - `/home/manuel/code/wesen/2026-05-07--listen-killer/pkg/tui/view.go`
   - `/home/manuel/code/wesen/2026-05-07--listen-killer/cmd/listen-killer/main.go`
   - `/home/manuel/code/wesen/2026-05-07--listen-killer/cmd/listen-killer/cmds/tui/tui.go`
+## Step 3: Fix Critical Key Handling Bugs
+
+The user reported that keys don't work in the TUI. Root cause: two critical bugs in the update flow.
+
+### Prompt Context
+
+**User prompt (verbatim):** "run in tmu and try navigating, because the keys don't work."
+**User prompt (verbatim):** "continue — We're taking over for your little brother who I think has been struggling quite a bit. Assess the situation, you might have to do / undo some significant stuff."
+
+**Assistant interpretation:** The previous implementation had critical bugs preventing any key interaction from working. A fresh assessment was needed.
+
+**Inferred user intent:** Fix the TUI so all keys work — navigation, detail view, kill dialog, quit, refresh.
+
+**Commit (code):** `15c6a7f` — "Fix critical key handling bugs — all navigation now works"
+
+### What I did
+- **BUG 1 (CRITICAL): `handleTableKey` was a value-receiver returning `(bool, tea.Cmd)`** — Model mutations (mode changes, status updates, kill PID/name state) happened on a copy of the Model and were silently discarded. Fixed by changing the signature to `(Model, bool, tea.Cmd)` so the modified model propagates back.
+- **BUG 2: All navigation keys were swallowed** — The original `updateTable` handled specific keys but returned `m, nil` for everything else, consuming the key before it could reach the table widget. Fixed: only intercept action keys (q/K/r/a/enter//), delegate everything else to `m.table.Update(msg)`.
+- **BUG 3: Dead "deprecated" comment** — Removed.
+- **BUG 4: Footer `renderFooter` could panic** — Spacer width calc used `m.width` before WindowSizeMsg arrived. Added `if avail < 0 { avail = 0 }` guard.
+- **BUG 5: Detail/kill overlays replaced the body** — Changed to render on top of the table using `lipgloss.Place()`.
+
+### Why
+- Go value-receiver methods create copies. If you modify the receiver inside the method, the caller never sees the changes unless you return the modified copy. This is fundamental Go semantics, easy to miss when refactoring from `(tea.Model, tea.Cmd)` to a custom return signature.
+- The bubbles/table widget handles its own key bindings (up/down/j/k/pgup/pgdn/home/end) internally via its Update method. If our Update intercepts keys before they reach the table, navigation silently breaks.
+
+### What worked
+- All 6 interactive features verified in tmux: j/k navigation, enter detail, K kill dialog, ↑↓ signal select, y confirm kill (process actually died!), n cancel, r refresh, q quit
+- Kill flow end-to-end: python3 test listener killed → table refreshed from 10→9 listeners
+
+### What didn't work
+- tmux capture-pane strips ANSI formatting — can't see which row is highlighted. But navigation works (confirmed by detail view showing the correct process after moving with j/k)
+- Initial attempt used `handleTableKey(msg tea.KeyMsg)` — switched to `handleTableKey(key string)` to simplify the signature since we only use `msg.String()` anyway
+
+### What I learned
+- **Golden rule for Bubbletea**: any key you don't explicitly handle in table mode MUST be delegated to `table.Update(msg)`. The table widget is not a passive renderer — it's an active component with its own key bindings.
+- **Go value-receiver trap**: when factoring out helper methods from `Update()`, you MUST return the modified Model. The Bubbletea framework expects `Update()` to return `(tea.Model, tea.Cmd)` — the modified model IS the state.
+
+### What was tricky to build
+- The `handleTableKey` signature evolved through 3 iterations: first `(bool, tea.Cmd)` (mutations lost), then `(Model, bool, tea.Cmd)` (current, correct). The Go compiler doesn't warn you when value-receiver mutations are discarded.
+- Testing TUI interaction non-interactively requires tmux send-keys, which sends real terminal events. Piping stdin to a Bubbletea program doesn't work.
+
+### What warrants a second pair of eyes
+- The `updateDetail` and `updateKill` methods also use value receivers and return `(tea.Model, tea.Cmd)` — these work correctly because they return the model directly. But verify the pattern is consistent.
+- The `enter` key is intercepted for detail view — the bubbles/table doesn't bind `enter` by default, so this is fine. But if a future version of bubbles adds enter handling, we'd have a conflict.
+
+### What should be done in the future
+- Add `?` help overlay that shows all key bindings with descriptions
+- Implement the `/` filter feature (currently shows "not yet implemented")
+- Add process tree view in detail mode (like lsof-who's parent chain)
+- Consider adding a confirm step before quitting with unsaved state
+
+### Code review instructions
+- Focus on `pkg/tui/update.go` — the `handleTableKey` return signature is the critical fix
+- Test interactively: `go run ./cmd/listen-killer/` then j/k/Enter/K/y/n/r/q
+
+### Technical details
+- bubbles/table v1.0.0 default keymap: up/k=LineUp, down/j=LineDown, b/pgup=PageUp, f/pgdn=PageDown, u/ctrl+u=HalfPageUp, d/ctrl+d=HalfPageDown, home/g=GotoTop, end/G=GotoBottom
+- These keys MUST reach `table.Update()` for navigation to work
