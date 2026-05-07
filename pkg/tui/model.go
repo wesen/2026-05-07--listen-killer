@@ -108,6 +108,7 @@ func NewModel() Model {
 		table.WithColumns(columns),
 		table.WithFocused(true),
 		table.WithHeight(20),
+		table.WithRows([]table.Row{}),
 	)
 
 	s := table.DefaultStyles()
