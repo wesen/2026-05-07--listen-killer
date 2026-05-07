@@ -13,8 +13,6 @@ import (
 // ---------------------------------------------------------------------------
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 
 	// --- Window resize ---
@@ -26,28 +24,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			m.ready = true
 		}
+		return m, nil
 
 	// --- Keyboard ---
 	case tea.KeyMsg:
-		// Global keys (work in any mode)
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
+		key := msg.String()
 
-		case "?":
+		// ctrl+c always quits
+		if key == "ctrl+c" {
+			return m, tea.Quit
+		}
+
+		// ? toggles help in any mode
+		if key == "?" {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 		}
 
-		// Mode-specific key handling
 		switch m.mode {
 		case modeTable:
-			return m.updateTable(msg)
+			// In table mode: intercept our action keys,
+			// delegate everything else to the table widget
+			// for navigation (up/down/j/k/pgup/pgdn/home/end).
+			var cmd tea.Cmd
+			m, handled, cmd := m.handleTableKey(key)
+			if handled {
+				return m, cmd
+			}
+			// Not one of our keys — let the table handle it
+			var tCmd tea.Cmd
+			m.table, tCmd = m.table.Update(msg)
+			return m, tCmd
+
 		case modeDetail:
-			return m.updateDetail(msg)
+			return m.updateDetail(key)
+
 		case modeKill:
-			return m.updateKill(msg)
+			return m.updateKill(key)
 		}
+
+		return m, nil
 
 	// --- Data loaded ---
 	case ListenersLoadedMsg:
@@ -68,94 +84,98 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Failed: %v", msg.Err)
 		} else {
 			m.statusMsg = fmt.Sprintf("Sent %s to PID %d", msg.Signal, msg.PID)
-			cmds = append(cmds, m.loadListeners())
+			return m, m.loadListeners()
 		}
-		return m, tea.Batch(cmds...)
+		return m, nil
 
 	// --- Auto-refresh tick ---
 	case RefreshTickMsg:
 		if m.autoRefresh && m.mode == modeTable {
-			cmds = append(cmds, m.loadListeners(), autoRefreshTick(m.refreshSeconds))
+			return m, tea.Batch(m.loadListeners(), autoRefreshTick(m.refreshSeconds))
 		}
-		return m, tea.Batch(cmds...)
+		return m, nil
 	}
 
-	// Delegate to table for its own navigation keys
+	// Delegate non-key messages (e.g. focus) to the table
 	var tCmd tea.Cmd
 	m.table, tCmd = m.table.Update(msg)
-	cmds = append(cmds, tCmd)
-
-	return m, tea.Batch(cmds...)
+	return m, tCmd
 }
 
 // ---------------------------------------------------------------------------
-// Table mode
+// Table mode key handling
 // ---------------------------------------------------------------------------
 
-func (m Model) updateTable(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
+// handleTableKey intercepts action keys in table mode.
+// Returns the (possibly modified) model, whether the key was consumed,
+// and an optional command.
+func (m Model) handleTableKey(key string) (Model, bool, tea.Cmd) {
+	switch key {
 
-	switch {
-	case key == "q":
-		return m, tea.Quit
+	case "q":
+		return m, true, tea.Quit
 
-	case key == "K":
+	case "K":
 		row := m.table.SelectedRow()
 		if len(row) == 0 {
 			m.statusMsg = "No process selected"
-			return m, nil
+			return m, true, nil
 		}
-		pidStr := row[0]
 		var pid int32
-		fmt.Sscanf(pidStr, "%d", &pid)
+		fmt.Sscanf(row[0], "%d", &pid)
 		m.killPID = pid
 		m.killName = row[1]
 		m.killSignal = m.killSignals[0]
 		m.killIdx = 0
 		m.mode = modeKill
-		return m, nil
+		return m, true, nil
 
-	case key == "r":
+	case "r":
 		m.loading = true
 		m.statusMsg = "Refreshing..."
-		return m, m.loadListeners()
+		return m, true, m.loadListeners()
 
-	case key == "a":
+	case "a":
 		m.autoRefresh = !m.autoRefresh
 		if m.autoRefresh {
 			m.statusMsg = fmt.Sprintf("Auto-refresh: %ds", m.refreshSeconds)
-			return m, autoRefreshTick(m.refreshSeconds)
+			return m, true, autoRefreshTick(m.refreshSeconds)
 		}
 		m.statusMsg = "Auto-refresh off"
-		return m, nil
+		return m, true, nil
 
-	case key == "enter":
+	case "enter":
 		row := m.table.SelectedRow()
 		if len(row) == 0 {
-			return m, nil
+			return m, true, nil
 		}
-		pidStr := row[0]
 		var pid int32
-		fmt.Sscanf(pidStr, "%d", &pid)
+		fmt.Sscanf(row[0], "%d", &pid)
 		for _, l := range m.listeners {
 			if l.PID == pid {
 				info := l
 				m.detailInfo = &info
 				m.mode = modeDetail
-				return m, nil
+				return m, true, nil
 			}
 		}
+		return m, true, nil
+
+	case "/":
+		m.statusMsg = "Filter: not yet implemented"
+		return m, true, nil
 	}
 
-	return m, nil
+	// Not our key — let the table handle navigation (up/down/j/k/pgup/pgdn/etc.)
+	return m, false, nil
 }
 
 // ---------------------------------------------------------------------------
 // Detail mode
 // ---------------------------------------------------------------------------
 
-func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+func (m Model) updateDetail(key string) (tea.Model, tea.Cmd) {
+	switch key {
 	case "esc", "q":
 		m.mode = modeTable
 		m.detailInfo = nil
@@ -177,8 +197,8 @@ func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Kill confirmation mode
 // ---------------------------------------------------------------------------
 
-func (m Model) updateKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+func (m Model) updateKill(key string) (tea.Model, tea.Cmd) {
+	switch key {
 	case "esc", "q":
 		m.mode = modeTable
 		return m, nil
@@ -193,14 +213,14 @@ func (m Model) updateKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = "Kill cancelled"
 		return m, nil
 
-	case "up", "k":
+	case "up":
 		if m.killIdx > 0 {
 			m.killIdx--
 			m.killSignal = m.killSignals[m.killIdx]
 		}
 		return m, nil
 
-	case "down", "j":
+	case "down":
 		if m.killIdx < len(m.killSignals)-1 {
 			m.killIdx++
 			m.killSignal = m.killSignals[m.killIdx]
@@ -210,7 +230,10 @@ func (m Model) updateKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// renderFooter builds the bottom status/help bar.
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
 func (m Model) renderFooter() string {
 	status := m.styles.StatusOK.Render(m.statusMsg)
 	if strings.HasPrefix(m.statusMsg, "Error") || strings.HasPrefix(m.statusMsg, "Failed") {
@@ -218,7 +241,18 @@ func (m Model) renderFooter() string {
 	}
 
 	helpView := m.help.View(m.keys)
-	spacer := lipgloss.NewStyle().Width(m.width - lipgloss.Width(status) - lipgloss.Width(helpView) - 4).Render("")
+
+	// Guard against zero/negative width before first WindowSizeMsg
+	avail := m.width - lipgloss.Width(status) - lipgloss.Width(helpView) - 4
+	if avail < 0 {
+		avail = 0
+	}
+	spacer := lipgloss.NewStyle().Width(avail).Render("")
 	footer := lipgloss.JoinHorizontal(lipgloss.Left, status, spacer, helpView)
-	return m.styles.Footer.Width(m.width - 2).Render(footer)
+
+	fw := m.width - 2
+	if fw < 10 {
+		fw = 10
+	}
+	return m.styles.Footer.Width(fw).Render(footer)
 }

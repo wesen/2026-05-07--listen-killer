@@ -16,25 +16,30 @@ func (m Model) View() string {
 		return "Initializing..."
 	}
 
+	w := m.width - 2
+	if w < 20 {
+		w = 20
+	}
+
 	// Title bar
 	title := m.styles.Title.Render("🎧 Listen Killer")
 	if m.loading {
-		title = m.styles.Title.Render("🎧 Listen Killer  ⏳ scanning...")
+		title = m.styles.Title.Render("🎧 Listen Killer  ⏳")
 	}
 	countText := m.styles.TitleBar.Render(fmt.Sprintf(" %d listeners ", len(m.listeners)))
-	titleBar := lipgloss.NewStyle().Width(m.width - 2).Render(
+	titleBar := lipgloss.NewStyle().Width(w).Render(
 		lipgloss.JoinHorizontal(lipgloss.Left, title, countText),
 	)
 
-	// Body
-	var body string
+	// Body — always render the table as the base layer
+	body := m.renderTable()
+
+	// Overlay the detail or kill dialog on top
 	switch m.mode {
-	case modeTable:
-		body = m.renderTable()
 	case modeDetail:
-		body = m.renderDetail()
+		body = m.renderDetailOverlay(body)
 	case modeKill:
-		body = m.renderKillDialog()
+		body = m.renderKillOverlay(body)
 	}
 
 	// Footer
@@ -44,7 +49,7 @@ func (m Model) View() string {
 }
 
 // ---------------------------------------------------------------------------
-// Table view
+// Table view (always rendered as the base layer)
 // ---------------------------------------------------------------------------
 
 func (m Model) renderTable() string {
@@ -60,12 +65,12 @@ func (m Model) renderTable() string {
 }
 
 // ---------------------------------------------------------------------------
-// Detail view
+// Detail view (rendered as overlay on top of the table)
 // ---------------------------------------------------------------------------
 
-func (m Model) renderDetail() string {
+func (m Model) renderDetailOverlay(base string) string {
 	if m.detailInfo == nil {
-		return "No process selected."
+		return base
 	}
 
 	info := m.detailInfo
@@ -74,10 +79,16 @@ func (m Model) renderDetail() string {
 		addr = "*"
 	}
 
+	// Truncate long cmdlines for display
+	cmdline := info.Cmdline
+	if len(cmdline) > 80 {
+		cmdline = cmdline[:77] + "..."
+	}
+
 	rows := []string{
 		m.renderKV("PID", fmt.Sprintf("%d", info.PID)),
 		m.renderKV("Name", info.Name),
-		m.renderKV("Cmdline", info.Cmdline),
+		m.renderKV("Cmdline", cmdline),
 		m.renderKV("Binary", info.Exe),
 		m.renderKV("User", info.Username),
 		m.renderKV("Port", fmt.Sprintf("%d (%s)", info.Port, info.Protocol)),
@@ -91,7 +102,22 @@ func (m Model) renderDetail() string {
 	body := strings.Join(rows, "\n")
 	footer := "\n\n" + m.styles.DetailLabel.Render("[K] Kill  •  [esc] Back")
 
-	return m.styles.DetailView.Render(title + "\n\n" + body + footer)
+	detailBox := m.styles.DetailView.Render(title + "\n\n" + body + footer)
+
+	// Center the detail box on top of the base view
+	w := m.width - 2
+	h := m.height - 6
+	if w < 20 {
+		w = 20
+	}
+	if h < 10 {
+		h = 10
+	}
+
+	return lipgloss.Place(w, h,
+		lipgloss.Center, lipgloss.Center,
+		detailBox,
+	)
 }
 
 func (m Model) renderKV(label, value string) string {
@@ -99,10 +125,10 @@ func (m Model) renderKV(label, value string) string {
 }
 
 // ---------------------------------------------------------------------------
-// Kill dialog
+// Kill dialog (rendered as overlay on top of the table)
 // ---------------------------------------------------------------------------
 
-func (m Model) renderKillDialog() string {
+func (m Model) renderKillOverlay(base string) string {
 	title := m.styles.DialogTitle.Render("⚠ Kill Process")
 
 	info := fmt.Sprintf("PID %d — %s", m.killPID, m.killName)
@@ -139,7 +165,16 @@ func (m Model) renderKillDialog() string {
 			footer,
 	)
 
-	return lipgloss.Place(m.width-2, m.height-4,
+	w := m.width - 2
+	h := m.height - 6
+	if w < 20 {
+		w = 20
+	}
+	if h < 10 {
+		h = 10
+	}
+
+	return lipgloss.Place(w, h,
 		lipgloss.Center, lipgloss.Center,
 		dialog,
 	)
