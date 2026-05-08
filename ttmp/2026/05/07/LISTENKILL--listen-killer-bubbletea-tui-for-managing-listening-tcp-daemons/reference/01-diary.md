@@ -322,3 +322,29 @@ Added three new features requested by the user.
 ### What should be done in the future
 - Add SVG or ANSI-rendered screenshots for GitHub dark/light theme matching
 - Record a GIF/asciinema for animated demo
+
+## Step 6: Obsidian vault article — textbook-style technical deep dive
+
+### Prompt Context
+
+**User prompt (verbatim):** "Write a project report in our obsidian vault on how listen-killer was built, how it works, as a technical deep dive blog post kind of, using a textbook writing style (see skill)"
+
+**Commit (code):** No repo commit (article is in the obsidian vault, outside the repo)
+
+### What I did
+- Read the textbook-authoring skill (Peter Norvig style: foundational first, prose paragraphs, concrete examples, breaks in rhythm, no AI slop)
+- Read the obsidian-vault-writing skill (frontmatter, PROJ vs ARTICLE decision, append-only)
+- Read the PROJ - ZK Tool exemplar and ARTICLE - Playbook exemplar for style matching
+- Decided on ARTICLE (not PROJ) because the knowledge is reusable: combining Bubbletea + Glazed is a pattern, not a one-off project report
+- Wrote a 22KB / 446-line article covering:
+  - Three-layer architecture with Mermaid diagrams
+  - Data layer: gopsutil scanning, ListenerInfo struct tags, KillProcess signal selection
+  - TUI layer: Elm Architecture, value-receiver mutation bug (the most important lesson), swallowed navigation keys, multi-mark, detail pane vertical layout, browser launching, kill dialog overlay
+  - CLI layer: dual-mode TUI/CLI, Glazed row emission, root command wiring
+  - Common failure modes (5 specific bugs with explanations)
+  - Working rules (7 concrete rules)
+  - Related notes with wikilinks
+
+### Why
+- The textbook style demands *why* before *how*. Every design decision is explained in context: "If handlers returned values directly, the framework would have to decide what to do with those values." This teaches the reader to reason about the architecture, not just copy the code.
+- ARTICLE over PROJ because the patterns (value-receiver bugs, key delegation, dual-mode CLI/TUI) generalize far beyond Listen Killer.
