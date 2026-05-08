@@ -284,3 +284,41 @@ Added three new features requested by the user.
 - Implement `/` filter feature
 - Add scrolling in detail pane for long cmdlines
 - Consider showing open files count in detail pane (like lsof-who)
+
+## Step 5: Detail pane default on + vertical layout, README + screenshots
+
+### Prompt Context
+
+**User prompt (verbatim):** "detail pane open by default. Use tmux to view and make sure its visible. It should be horizontally below, since we have a fair amount of real estate vertically"
+
+**User prompt (verbatim):** "Create a nice README.md, capture some screenshots."
+
+**Commit (code):** `dd24090` — "Detail pane: on by default, layout below table (vertical split)"
+**Commit (code):** `8008f60` — previous feature commit (already recorded)
+**Commit (code):** `994d252` — "Add README.md with screenshots and documentation"
+
+### What I did
+- Changed `showDetail` default to `true` in `NewModel()`
+- Changed layout from horizontal (side-by-side) to vertical: table on top, `────` separator, detail pane below
+- Detail pane uses full width with compact multi-column key-value layout (PID+Name+User+Uptime on row 1, Port+Address+CPU+Memory on row 2, Binary, Cmdline, URL on subsequent rows)
+- Table height adjusts: `height-5-12` when detail on, `height-5` when off
+- Took 4 PNG screenshots using kitty + xdotool + imagemagick import:
+  1. Main view (table + detail pane)
+  2. With marks (3 rows marked with ●)
+  3. Kill dialog (bulk kill of 3 processes)
+  4. Table only (detail pane off)
+- Screenshots trimmed with `convert -trim` and resized to ~890px wide
+- Wrote comprehensive README with screenshots, key bindings table, features, architecture, tech stack
+
+### What worked
+- Vertical layout is much more readable than horizontal — full width for both table and detail
+- Kitty + `import -window` gives clean PNG screenshots
+- `convert -trim -resize 900x` produces README-friendly images
+
+### What was tricky to build
+- Kitty terminal resisted xdotool windowsize — had to use the window as-is and crop after with `convert -trim`
+- tmux capture-pane strips ANSI colors — can't see highlights in captures, but screenshots via X work fine
+
+### What should be done in the future
+- Add SVG or ANSI-rendered screenshots for GitHub dark/light theme matching
+- Record a GIF/asciinema for animated demo
