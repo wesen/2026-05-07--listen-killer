@@ -16,6 +16,42 @@ import (
 	apptui "github.com/wesen/listen-killer/pkg/tui"
 )
 
+const defaultListMarkdownTemplate = `# Listening TCP Servers
+
+{{- if not .rows }}
+No TCP listeners found.
+{{- end }}
+{{- range $i, $p := .rows }}
+
+## {{ add $i 1 }}.{{ if .name }} {{ .name }}{{ else }} Process{{ end }}{{ if .pid }} (PID {{ .pid }}){{ end }}
+{{- if .port }}
+
+- **Listen:** {{ if .address }}{{ .address }}:{{ end }}{{ .port }}{{ if .protocol }} ({{ .protocol }}){{ end }}
+{{- end }}
+{{- if .username }}
+- **User:** {{ .username }}
+{{- end }}
+{{- if .uptime }}
+- **Uptime:** {{ .uptime }}
+{{- end }}
+{{- if .rss_human }}
+- **Memory:** {{ .rss_human }}
+{{- end }}
+{{- if .cpu_percent }}
+- **CPU:** {{ .cpu_percent }}%
+{{- end }}
+{{- if .exe }}
+- **Executable:** {{ .exe }}
+{{- end }}
+{{- if .cwd }}
+- **Started from:** {{ .cwd }}
+{{- end }}
+{{- if .cmdline }}
+- **Command:** {{ .cmdline }}
+{{- end }}
+{{- end }}
+`
+
 // ListCommand is a Glazed command that always emits structured listener data.
 type ListCommand struct {
 	*cmds.CommandDescription
@@ -35,7 +71,8 @@ func NewListCommand() (*ListCommand, error) {
 	glazedSection, err := settings.NewGlazedSchema(
 		settings.WithOutputSectionOptions(
 			schema.WithDefaults(map[string]interface{}{
-				"output": "markdown",
+				"output":        "template",
+				"template-file": defaultListMarkdownTemplate,
 			}),
 		),
 	)
@@ -54,8 +91,9 @@ func NewListCommand() (*ListCommand, error) {
 		cmds.WithLong(`
 Show all TCP listening sockets on the system with process details.
 
-Emits structured Glazed rows formatted as Markdown by default. Use --output
-json/yaml/csv/table for scripts, CI diagnostics, and LLM-agent workflows.
+Emits structured Glazed rows formatted as readable Markdown by default: one
+section per listening process. Use --output json/yaml/csv/table for scripts,
+CI diagnostics, and LLM-agent workflows.
 
 For the interactive dashboard, run: listen-killer tui.
 

@@ -18,8 +18,8 @@ var rootCmd = &cobra.Command{
 	Use:   "listen-killer",
 	Short: "Structured CLI and TUI for managing listening TCP daemons",
 	Long: `Listen Killer shows all TCP listening sockets with process metadata.
-The list command is script-friendly by default and emits Markdown unless another
-Glazed output format is requested.
+The list command is script-friendly by default and emits readable Markdown with
+one section per process unless another Glazed output format is requested.
 
 Run without arguments to print a Markdown listener table:
   listen-killer

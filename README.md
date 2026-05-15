@@ -49,8 +49,8 @@ go build -o ~/bin/listen-killer ./cmd/listen-killer/
 ### CLI / Scripting / Agent Mode (default)
 
 ```bash
-listen-killer                                           # Markdown output
-listen-killer list                                      # Markdown output
+listen-killer                                           # readable Markdown, one section per process
+listen-killer list                                      # readable Markdown, one section per process
 listen-killer list --output json                        # JSON output
 listen-killer list --output yaml                        # YAML output
 listen-killer list --output csv                         # CSV output
@@ -119,7 +119,7 @@ Press `o` to open the selected listener in your default browser (`xdg-open` on L
 The same data is available as structured output via the Glazed command framework. The output includes the owning process, bind address, port, executable path, working directory (`cwd`), command line, uptime, CPU%, and memory usage:
 
 ```bash
-# Markdown table (default)
+# Readable Markdown (default): one section per listening process
 listen-killer list
 
 # JSON for scripting

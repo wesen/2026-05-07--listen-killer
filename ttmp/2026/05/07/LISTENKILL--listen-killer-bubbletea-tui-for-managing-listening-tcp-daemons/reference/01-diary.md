@@ -400,3 +400,28 @@ Added three new features requested by the user.
   - `go run ./cmd/listen-killer`
 - Verified JSON override still works:
   - `go run ./cmd/listen-killer list --port 5173 --output json --fields pid,name,port,cwd`
+
+## Step 9: Human-readable default Markdown for list
+
+### Prompt Context
+
+**User prompt (verbatim):** "make the default markdown output readable for a human, instead of a big table. One section pre process, etc..."
+
+### What changed
+- Changed `list` default output from Glazed's Markdown table formatter to Glazed's template formatter.
+- Added an embedded Markdown template that renders:
+  - `# Listening TCP Servers`
+  - one `## N. process (PID pid)` section per listener
+  - bullet lines for listen address/port, user, uptime, memory, CPU, executable, cwd, and command line
+- Kept structured output overrides intact (`--output json`, `--output yaml`, `--output csv`, `--output table`).
+- Made the template conditional so `--fields ...` selection does not print `<no value>` for omitted fields.
+- Updated README wording from "Markdown table" to "readable Markdown, one section per process".
+
+### Validation
+- Ran `go test ./...` successfully.
+- Verified default readable Markdown:
+  - `go run ./cmd/listen-killer list --port 5173`
+- Verified field-selected default Markdown does not emit `<no value>`:
+  - `go run ./cmd/listen-killer list --fields pid,name,port,cwd --port 5173`
+- Verified structured override still works:
+  - `go run ./cmd/listen-killer list --port 5173 --output json --fields pid,name,port,cwd`
