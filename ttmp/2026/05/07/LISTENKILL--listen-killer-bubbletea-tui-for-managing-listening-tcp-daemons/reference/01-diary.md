@@ -348,3 +348,34 @@ Added three new features requested by the user.
 ### Why
 - The textbook style demands *why* before *how*. Every design decision is explained in context: "If handlers returned values directly, the framework would have to decide what to do with those values." This teaches the reader to reason about the architecture, not just copy the code.
 - ARTICLE over PROJ because the patterns (value-receiver bugs, key delegation, dual-mode CLI/TUI) generalize far beyond Listen Killer.
+
+## Step 7: Scriptable Glazed CLI tooling layer and kill verb
+
+### Prompt Context
+
+**User prompt (verbatim):** "Use the glazed command framework to add a whole CLI tooling layer to this tool, so that it can be used as part of scripts or llm agent workflows. Add a dual mode command that shows the open ports, which processes are holding them and from where they got started, etc... along with a structured version of that data. also add a verb to kill running servers (one or more)."
+
+### What changed
+- Expanded `list` into a more complete dual-mode Glazed command:
+  - Keeps TUI-by-default behavior in an interactive terminal.
+  - Uses structured CLI mode with `--no-tui` or when piped.
+  - Adds filters: `--pid`, `--port`, `--name`, `--user`, `--path`.
+  - Emits `cwd` in addition to PID, process name, command line, executable path, port, address, protocol, uptime, CPU, and memory.
+- Added a new Glazed `kill` verb:
+  - Accepts positional targets: bare `PID`, `pid:PID`, `:PORT`, `port:PORT`.
+  - Accepts repeatable/comma-separated flags: `--pid`, `--port`.
+  - Accepts optional refiners: `--name`, `--user`, `--path`.
+  - Supports `--signal TERM|KILL|INT`.
+  - Requires `--yes` for destructive execution and supports `--dry-run` for safe agent planning.
+  - Emits one structured result row per target PID with ports, addresses, cwd, cmdline, matched_by, killed, and error.
+- Added helper functions for row construction, list parsing, address normalization, and case-insensitive filters.
+- Updated the TUI detail pane to show the process working directory.
+- Updated README with script/agent examples and structured kill examples.
+
+### Validation
+- Ran `go test ./...` successfully.
+- Verified structured list output:
+  - `go run ./cmd/listen-killer list --no-tui --port 5173 --output json --fields pid,name,port,cwd,cmdline`
+- Verified kill dry-run output:
+  - `go run ./cmd/listen-killer kill --port 5173 --dry-run --output json --fields pid,name,ports,cwd,signal,dry_run,killed,matched_by,error`
+- Verified kill safety guard refuses destructive execution without `--yes`.

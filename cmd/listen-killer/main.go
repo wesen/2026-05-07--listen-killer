@@ -23,8 +23,10 @@ You can sort, filter, kill processes, and export data as JSON/YAML/CSV.
 Run without arguments to launch the TUI dashboard:
   listen-killer
 
-For CLI/scripting mode:
-  listen-killer list --no-tui --output json`,
+For CLI/scripting and LLM-agent mode:
+  listen-killer list --no-tui --output json
+  listen-killer kill --port 3000 --dry-run --output json
+  listen-killer kill --port 3000 --signal TERM --yes`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -53,10 +55,29 @@ func main() {
 		}),
 	)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error building cobra command: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error building cobra list command: %v\n", err)
 		os.Exit(1)
 	}
 	rootCmd.AddCommand(cobraListCmd)
+
+	// Register the "kill" subcommand (structured, scriptable process killer)
+	killCmd, err := listcmd.NewKillCommand()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error creating kill command: %v\n", err)
+		os.Exit(1)
+	}
+
+	cobraKillCmd, err := cli.BuildCobraCommand(killCmd,
+		cli.WithParserConfig(cli.CobraParserConfig{
+			AppName:           "listen-killer",
+			ShortHelpSections: []string{schema.DefaultSlug},
+		}),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error building cobra kill command: %v\n", err)
+		os.Exit(1)
+	}
+	rootCmd.AddCommand(cobraKillCmd)
 
 	// Help system
 	helpSystem := help.NewHelpSystem()

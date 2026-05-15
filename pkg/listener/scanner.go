@@ -45,6 +45,7 @@ func gatherProcessInfo(conn net.ConnectionStat) (*ListenerInfo, error) {
 	name, _ := proc.Name()
 	cmdline, _ := proc.Cmdline()
 	exe, _ := proc.Exe()
+	cwd, _ := proc.Cwd()
 	username, _ := proc.Username()
 
 	// CPU percent — use duration 0 to get cached value (avoids 1s blocking call)
@@ -72,6 +73,7 @@ func gatherProcessInfo(conn net.ConnectionStat) (*ListenerInfo, error) {
 		Name:          name,
 		Cmdline:       cmdline,
 		Exe:           exe,
+		Cwd:           cwd,
 		Username:      username,
 		Port:          conn.Laddr.Port,
 		Address:       address,

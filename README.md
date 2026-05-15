@@ -52,15 +52,28 @@ go build -o ~/bin/listen-killer ./cmd/listen-killer/
 listen-killer          # launches the TUI dashboard
 ```
 
-### CLI / Scripting Mode
+### CLI / Scripting / Agent Mode
 
 ```bash
-listen-killer list --no-tui                     # table output
-listen-killer list --no-tui --output json       # JSON output
-listen-killer list --no-tui --output yaml       # YAML output
-listen-killer list --no-tui --output csv        # CSV output
-listen-killer list --no-tui --fields pid,name,port,uptime  # select columns
+listen-killer list --no-tui                              # table output
+listen-killer list --no-tui --output json                # JSON output
+listen-killer list --no-tui --output yaml                # YAML output
+listen-killer list --no-tui --output csv                 # CSV output
+listen-killer list --no-tui --fields pid,name,port,cwd   # select columns
+listen-killer list --no-tui --port 3000 --output json    # filter by port
+listen-killer list --no-tui --name node --fields pid,port,cwd,cmdline
 ```
+
+### Scriptable Kill Verb
+
+```bash
+listen-killer kill --port 3000 --dry-run --output json   # resolve targets safely
+listen-killer kill --port 3000 --signal TERM --yes       # graceful stop
+listen-killer kill 1234 pid:5678 :8080 --signal KILL --yes --output json
+listen-killer kill --name node --path /path/to/project --signal TERM --yes
+```
+
+`kill` emits one structured result row per target PID with `pid`, `name`, `ports`, `addresses`, `exe`, `cwd`, `cmdline`, `signal`, `dry_run`, `killed`, `matched_by`, and `error`. Destructive execution requires `--yes`; use `--dry-run` for agent planning and review.
 
 ## Key Bindings
 
@@ -100,9 +113,9 @@ A compact detail view below the table shows all metadata for the selected proces
 
 Press `o` to open the selected listener in your default browser (`xdg-open` on Linux, `open` on macOS). Bind addresses like `0.0.0.0`, `*`, or `::` are normalized to `127.0.0.1`.
 
-### CLI Output
+### CLI Tooling Layer
 
-The same data is available as structured output via the Glazed command framework:
+The same data is available as structured output via the Glazed command framework. The output includes the owning process, bind address, port, executable path, working directory (`cwd`), command line, uptime, CPU%, and memory usage:
 
 ```bash
 # Pretty table
@@ -115,7 +128,23 @@ listen-killer list --no-tui --output json | jq '.[] | select(.port > 10000)'
 listen-killer list --no-tui --output csv
 
 # Custom columns
-listen-killer list --no-tui --fields pid,name,port,uptime,rss_human
+listen-killer list --no-tui --fields pid,name,port,cwd,cmdline,uptime,rss_human
+
+# Filters for scripts / agents
+listen-killer list --no-tui --port 5173 --output json
+listen-killer list --no-tui --name node --path my-project --fields pid,port,cwd,cmdline
+```
+
+### Structured Kill Results
+
+The `kill` verb resolves PIDs from explicit PIDs, `pid:PID`, `:PORT`, `port:PORT`, `--pid`, `--port`, and optional process filters (`--name`, `--user`, `--path`). It is safe by default: without `--yes` it refuses to signal anything, and `--dry-run` returns the exact targets it would kill.
+
+```bash
+# Agent-friendly planning step
+listen-killer kill --port 5173 --dry-run --output json
+
+# Execute after review
+listen-killer kill --port 5173 --signal TERM --yes --output json
 ```
 
 ## Architecture
@@ -145,7 +174,7 @@ listen-killer list --no-tui --fields pid,name,port,uptime,rss_human
 
 1. **Scanner** (`pkg/listener/scanner.go`): Uses `gopsutil/net` to find all TCP LISTEN sockets, then enriches each with process details from `gopsutil/process`.
 2. **TUI** (`pkg/tui/`): Bubbletea model with three modes — table navigation, kill confirmation dialog, and detail pane. The table is the `bubbles/table` widget from Charmbracelet.
-3. **CLI** (`cmd/listen-killer/`): Glazed command framework wraps the scanner for structured CLI output (JSON/YAML/CSV/table).
+3. **CLI** (`cmd/listen-killer/`): Glazed command framework wraps the scanner for structured list and kill commands (JSON/YAML/CSV/table), including filters for scripts and LLM-agent workflows.
 
 ### Tech Stack
 

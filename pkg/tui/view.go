@@ -105,6 +105,11 @@ func (m Model) renderDetailPane() string {
 		exe = exe[:77] + "..."
 	}
 
+	cwd := info.Cwd
+	if len(cwd) > 80 {
+		cwd = cwd[:77] + "..."
+	}
+
 	url := listenerURL(info)
 
 	label := m.styles.DetailLabel
@@ -131,12 +136,17 @@ func (m Model) renderDetailPane() string {
 		label.Render("Binary"), value.Render(exe),
 	)
 
-	// Row 4: cmdline
+	// Row 4: working directory
 	line4 := lipgloss.JoinHorizontal(lipgloss.Left,
+		label.Render("Cwd"), value.Render(cwd),
+	)
+
+	// Row 5: cmdline
+	line5 := lipgloss.JoinHorizontal(lipgloss.Left,
 		label.Render("Cmd"), value.Render(cmdline),
 	)
 
-	// Row 5: URL + marks
+	// Row 6: URL + marks
 	urlLine := lipgloss.JoinHorizontal(lipgloss.Left,
 		label.Render("URL"), value.Render(url),
 	)
@@ -152,7 +162,7 @@ func (m Model) renderDetailPane() string {
 	header := m.styles.DetailTitle.Render(fmt.Sprintf("%d — %s", info.PID, info.Name))
 
 	detail := lipgloss.NewStyle().
-		Width(m.width - 4).
+		Width(m.width-4).
 		Padding(0, 1).
 		Render(lipgloss.JoinVertical(lipgloss.Left,
 			header,
@@ -160,6 +170,7 @@ func (m Model) renderDetailPane() string {
 			line2,
 			line3,
 			line4,
+			line5,
 			urlLine,
 		))
 

@@ -12,6 +12,7 @@ type ListenerInfo struct {
 	Name          string  `json:"name"           glazed:"name"`
 	Cmdline       string  `json:"cmdline"        glazed:"cmdline"`
 	Exe           string  `json:"exe"            glazed:"exe"`
+	Cwd           string  `json:"cwd"            glazed:"cwd"`
 	Username      string  `json:"username"       glazed:"username"`
 	Port          uint32  `json:"port"           glazed:"port"`
 	Address       string  `json:"address"        glazed:"address"`

@@ -2,10 +2,9 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"os"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/go-go-golems/glazed/pkg/cli"
 	"github.com/go-go-golems/glazed/pkg/cmds"
 	"github.com/go-go-golems/glazed/pkg/cmds/fields"
@@ -13,7 +12,6 @@ import (
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
 	"github.com/go-go-golems/glazed/pkg/middlewares"
 	"github.com/go-go-golems/glazed/pkg/settings"
-	"github.com/go-go-golems/glazed/pkg/types"
 	"golang.org/x/term"
 
 	"github.com/wesen/listen-killer/pkg/listener"
@@ -29,8 +27,13 @@ type ListCommand struct {
 
 // ListSettings maps CLI flags to a struct.
 type ListSettings struct {
-	TUI   bool `glazed:"tui"`
-	NoTUI bool `glazed:"no-tui"`
+	TUI   bool     `glazed:"tui"`
+	NoTUI bool     `glazed:"no-tui"`
+	PIDs  []string `glazed:"pid"`
+	Ports []string `glazed:"port"`
+	Name  string   `glazed:"name"`
+	User  string   `glazed:"user"`
+	Path  string   `glazed:"path"`
 }
 
 // NewListCommand creates the Glazed command with field definitions and sections.
@@ -52,20 +55,25 @@ func NewListCommand() (*ListCommand, error) {
 Show all TCP listening sockets on the system with process details.
 
 In TUI mode (default when running in a terminal), launches an interactive
-dashboard where you can browse, sort, filter, and kill listening processes.
+dashboard where you can browse, mark, open, and kill listening processes.
 
-In CLI mode (--no-tui or when piped), outputs structured data that can be
-formatted as JSON, YAML, CSV, or a table.
+In CLI mode (--no-tui or when piped), emits structured Glazed rows that can be
+formatted as JSON, YAML, CSV, table, or field-selected output. This mode is
+intended for scripts, CI diagnostics, and LLM-agent workflows.
 
 Examples:
   # Interactive TUI dashboard
   listen-killer
 
-  # CLI: output as JSON for scripting
+  # CLI: output as JSON for scripting / LLM-agent workflows
   listen-killer list --no-tui --output json
 
-  # CLI: table output
-  listen-killer list --no-tui
+  # CLI: show selected fields only
+  listen-killer list --no-tui --fields pid,name,port,cwd,cmdline
+
+  # CLI: find one port or process family
+  listen-killer list --no-tui --port 3000 --output json
+  listen-killer list --no-tui --name node --fields pid,port,cwd,cmdline
 
   # Force TUI even when piped
   listen-killer list --tui
@@ -82,6 +90,36 @@ Examples:
 				fields.TypeBool,
 				fields.WithDefault(false),
 				fields.WithHelp("Force CLI mode even when in a terminal"),
+			),
+			fields.New(
+				"pid",
+				fields.TypeStringList,
+				fields.WithDefault([]string{}),
+				fields.WithHelp("Only show listeners owned by these PIDs (repeatable or comma-separated)"),
+			),
+			fields.New(
+				"port",
+				fields.TypeStringList,
+				fields.WithDefault([]string{}),
+				fields.WithHelp("Only show these listening ports (repeatable or comma-separated)"),
+			),
+			fields.New(
+				"name",
+				fields.TypeString,
+				fields.WithDefault(""),
+				fields.WithHelp("Only show listeners whose process name contains this string"),
+			),
+			fields.New(
+				"user",
+				fields.TypeString,
+				fields.WithDefault(""),
+				fields.WithHelp("Only show listeners owned by this user substring"),
+			),
+			fields.New(
+				"path",
+				fields.TypeString,
+				fields.WithDefault(""),
+				fields.WithHelp("Only show listeners whose executable, cwd, or cmdline contains this string"),
 			),
 		),
 		cmds.WithSections(glazedSection, cmdSection),
@@ -103,7 +141,7 @@ func (c *ListCommand) RunIntoGlazeProcessor(
 		return err
 	}
 
-	// Decide mode: TUI unless explicitly disabled or not a TTY
+	// Decide mode: TUI unless explicitly disabled or not a TTY.
 	useTUI := settings.TUI
 	if !settings.NoTUI && !settings.TUI {
 		useTUI = isTerminal()
@@ -113,7 +151,7 @@ func (c *ListCommand) RunIntoGlazeProcessor(
 		return runTUI()
 	}
 
-	return runCLI(ctx, gp)
+	return runCLI(ctx, gp, settings)
 }
 
 // isTerminal returns true if stdin is a terminal.
@@ -129,39 +167,28 @@ func runTUI() error {
 	return err
 }
 
-// runCLI scans listeners and emits them through the Glazed processor.
-func runCLI(ctx context.Context, gp middlewares.Processor) error {
+// runCLI scans listeners, applies script-friendly filters, and emits them
+// through the Glazed processor.
+func runCLI(ctx context.Context, gp middlewares.Processor, settings *ListSettings) error {
 	listeners, err := listener.ScanListeners()
 	if err != nil {
 		return err
 	}
 
-	for _, l := range listeners {
-		addr := l.Address
-		if addr == "" || addr == "::" {
-			addr = "*"
-		}
-		cpuStr := ""
-		if l.CPUPercent > 0 {
-			cpuStr = formatFloat(l.CPUPercent)
-		}
+	pidFilter, err := parseInt32List(settings.PIDs, "pid")
+	if err != nil {
+		return err
+	}
+	portFilter, err := parsePortList(settings.Ports, "port")
+	if err != nil {
+		return err
+	}
 
-		row := types.NewRow(
-			types.MRP("pid", l.PID),
-			types.MRP("name", l.Name),
-			types.MRP("cmdline", l.Cmdline),
-			types.MRP("exe", l.Exe),
-			types.MRP("username", l.Username),
-			types.MRP("port", l.Port),
-			types.MRP("address", addr),
-			types.MRP("protocol", l.Protocol),
-			types.MRP("uptime", l.Uptime),
-			types.MRP("uptime_seconds", l.UptimeSeconds),
-			types.MRP("cpu_percent", cpuStr),
-			types.MRP("rss_bytes", l.RSSBytes),
-			types.MRP("rss_human", l.RSSHuman),
-		)
-		if err := gp.AddRow(ctx, row); err != nil {
+	for _, l := range listeners {
+		if !matchesListFilters(l, pidFilter, portFilter, settings) {
+			continue
+		}
+		if err := gp.AddRow(ctx, listenerRow(l)); err != nil {
 			return err
 		}
 	}
@@ -169,9 +196,21 @@ func runCLI(ctx context.Context, gp middlewares.Processor) error {
 	return nil
 }
 
-func formatFloat(f float64) string {
-	if f == float64(int64(f)) {
-		return fmt.Sprintf("%.0f", f)
+func matchesListFilters(l listener.ListenerInfo, pids map[int32]bool, ports map[uint32]bool, settings *ListSettings) bool {
+	if len(pids) > 0 && !pids[l.PID] {
+		return false
 	}
-	return fmt.Sprintf("%.1f", f)
+	if len(ports) > 0 && !ports[l.Port] {
+		return false
+	}
+	if settings.Name != "" && !containsFold(l.Name, settings.Name) {
+		return false
+	}
+	if settings.User != "" && !containsFold(l.Username, settings.User) {
+		return false
+	}
+	if settings.Path != "" && !containsFold(l.Exe, settings.Path) && !containsFold(l.Cwd, settings.Path) && !containsFold(l.Cmdline, settings.Path) {
+		return false
+	}
+	return true
 }
