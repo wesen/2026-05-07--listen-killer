@@ -379,3 +379,24 @@ Added three new features requested by the user.
 - Verified kill dry-run output:
   - `go run ./cmd/listen-killer kill --port 5173 --dry-run --output json --fields pid,name,ports,cwd,signal,dry_run,killed,matched_by,error`
 - Verified kill safety guard refuses destructive execution without `--yes`.
+
+## Step 8: Make list script-first and move TUI to explicit verb
+
+### Prompt Context
+
+**User prompt (verbatim):** "make list per default output markdown, it shouldn't fork a tui (we already have a tui verb for that, right? or call it listen-killer tui if necessary"
+
+### What changed
+- Changed `listen-killer list` to always emit structured Glazed output and never auto-launch the Bubbletea TUI.
+- Set the default Glazed output format for `list` to Markdown via `settings.NewGlazedSchema(settings.WithOutputSectionOptions(schema.WithDefaults(...)))`.
+- Added an explicit `listen-killer tui` Cobra verb that launches the interactive Bubbletea dashboard.
+- Kept root default behavior (`listen-killer`) but it now aliases to script-first `list`, producing Markdown rather than entering an alternate-screen TUI.
+- Updated README and root command help text to describe CLI-first defaults and the explicit TUI verb.
+
+### Validation
+- Ran `go test ./...` successfully.
+- Verified Markdown default:
+  - `go run ./cmd/listen-killer list --fields pid,name,port`
+  - `go run ./cmd/listen-killer`
+- Verified JSON override still works:
+  - `go run ./cmd/listen-killer list --port 5173 --output json --fields pid,name,port,cwd`

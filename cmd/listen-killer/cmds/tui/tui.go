@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/go-go-golems/glazed/pkg/cli"
@@ -12,23 +11,18 @@ import (
 	"github.com/go-go-golems/glazed/pkg/cmds/values"
 	"github.com/go-go-golems/glazed/pkg/middlewares"
 	"github.com/go-go-golems/glazed/pkg/settings"
-	"golang.org/x/term"
 
 	"github.com/wesen/listen-killer/pkg/listener"
 	apptui "github.com/wesen/listen-killer/pkg/tui"
 )
 
-// ListCommand is a Glazed command that either launches the TUI or outputs
-// structured data, depending on the --tui / --no-tui flags and whether
-// stdin is a TTY.
+// ListCommand is a Glazed command that always emits structured listener data.
 type ListCommand struct {
 	*cmds.CommandDescription
 }
 
 // ListSettings maps CLI flags to a struct.
 type ListSettings struct {
-	TUI   bool     `glazed:"tui"`
-	NoTUI bool     `glazed:"no-tui"`
 	PIDs  []string `glazed:"pid"`
 	Ports []string `glazed:"port"`
 	Name  string   `glazed:"name"`
@@ -38,7 +32,13 @@ type ListSettings struct {
 
 // NewListCommand creates the Glazed command with field definitions and sections.
 func NewListCommand() (*ListCommand, error) {
-	glazedSection, err := settings.NewGlazedSchema()
+	glazedSection, err := settings.NewGlazedSchema(
+		settings.WithOutputSectionOptions(
+			schema.WithDefaults(map[string]interface{}{
+				"output": "markdown",
+			}),
+		),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -54,43 +54,29 @@ func NewListCommand() (*ListCommand, error) {
 		cmds.WithLong(`
 Show all TCP listening sockets on the system with process details.
 
-In TUI mode (default when running in a terminal), launches an interactive
-dashboard where you can browse, mark, open, and kill listening processes.
+Emits structured Glazed rows formatted as Markdown by default. Use --output
+json/yaml/csv/table for scripts, CI diagnostics, and LLM-agent workflows.
 
-In CLI mode (--no-tui or when piped), emits structured Glazed rows that can be
-formatted as JSON, YAML, CSV, table, or field-selected output. This mode is
-intended for scripts, CI diagnostics, and LLM-agent workflows.
+For the interactive dashboard, run: listen-killer tui.
 
 Examples:
+  # Markdown output (default)
+  listen-killer list
+
+  # JSON for scripting / LLM-agent workflows
+  listen-killer list --output json
+
+  # Show selected fields only
+  listen-killer list --fields pid,name,port,cwd,cmdline
+
+  # Find one port or process family
+  listen-killer list --port 3000 --output json
+  listen-killer list --name node --fields pid,port,cwd,cmdline
+
   # Interactive TUI dashboard
-  listen-killer
-
-  # CLI: output as JSON for scripting / LLM-agent workflows
-  listen-killer list --no-tui --output json
-
-  # CLI: show selected fields only
-  listen-killer list --no-tui --fields pid,name,port,cwd,cmdline
-
-  # CLI: find one port or process family
-  listen-killer list --no-tui --port 3000 --output json
-  listen-killer list --no-tui --name node --fields pid,port,cwd,cmdline
-
-  # Force TUI even when piped
-  listen-killer list --tui
+  listen-killer tui
 `),
 		cmds.WithFlags(
-			fields.New(
-				"tui",
-				fields.TypeBool,
-				fields.WithDefault(false),
-				fields.WithHelp("Force TUI mode even when piped"),
-			),
-			fields.New(
-				"no-tui",
-				fields.TypeBool,
-				fields.WithDefault(false),
-				fields.WithHelp("Force CLI mode even when in a terminal"),
-			),
 			fields.New(
 				"pid",
 				fields.TypeStringList,
@@ -141,26 +127,11 @@ func (c *ListCommand) RunIntoGlazeProcessor(
 		return err
 	}
 
-	// Decide mode: TUI unless explicitly disabled or not a TTY.
-	useTUI := settings.TUI
-	if !settings.NoTUI && !settings.TUI {
-		useTUI = isTerminal()
-	}
-
-	if useTUI {
-		return runTUI()
-	}
-
 	return runCLI(ctx, gp, settings)
 }
 
-// isTerminal returns true if stdin is a terminal.
-func isTerminal() bool {
-	return term.IsTerminal(int(os.Stdin.Fd()))
-}
-
-// runTUI launches the Bubbletea TUI.
-func runTUI() error {
+// RunTUI launches the Bubbletea TUI.
+func RunTUI() error {
 	m := apptui.NewModel()
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()

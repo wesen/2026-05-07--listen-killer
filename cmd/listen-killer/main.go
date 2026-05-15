@@ -16,15 +16,19 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "listen-killer",
-	Short: "Terminal dashboard for managing listening TCP daemons",
-	Long: `Listen Killer shows all TCP listening sockets in an interactive table.
-You can sort, filter, kill processes, and export data as JSON/YAML/CSV.
+	Short: "Structured CLI and TUI for managing listening TCP daemons",
+	Long: `Listen Killer shows all TCP listening sockets with process metadata.
+The list command is script-friendly by default and emits Markdown unless another
+Glazed output format is requested.
 
-Run without arguments to launch the TUI dashboard:
+Run without arguments to print a Markdown listener table:
   listen-killer
 
+For the interactive dashboard:
+  listen-killer tui
+
 For CLI/scripting and LLM-agent mode:
-  listen-killer list --no-tui --output json
+  listen-killer list --output json
   listen-killer kill --port 3000 --dry-run --output json
   listen-killer kill --port 3000 --signal TERM --yes`,
 	SilenceUsage:  true,
@@ -41,7 +45,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Register the "list" subcommand (Glazed + Bubbletea)
+	// Register the "list" subcommand (structured Glazed output; never launches TUI)
 	listCmd, err := listcmd.NewListCommand()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating list command: %v\n", err)
@@ -59,6 +63,17 @@ func main() {
 		os.Exit(1)
 	}
 	rootCmd.AddCommand(cobraListCmd)
+
+	// Register the explicit TUI subcommand. The list command never auto-forks the TUI.
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "tui",
+		Short: "Launch the interactive Bubbletea dashboard",
+		Long: `Launch the interactive Bubbletea dashboard for browsing, marking,
+opening, and killing listening TCP server processes.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listcmd.RunTUI()
+		},
+	})
 
 	// Register the "kill" subcommand (structured, scriptable process killer)
 	killCmd, err := listcmd.NewKillCommand()

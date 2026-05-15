@@ -10,7 +10,7 @@ Every dev machine accumulates stale daemons — dev servers, database proxies, A
 
 <img src="screenshots/01-main-view.png" width="700" alt="Main view showing listener table with detail pane below">
 
-The default view shows a scrollable table of all TCP listeners with a detail pane below. Navigate with `j`/`k`; the detail pane updates as you move.
+The TUI view shows a scrollable table of all TCP listeners with a detail pane below. Navigate with `j`/`k`; the detail pane updates as you move.
 
 ### Multi-Mark — Selecting Processes
 
@@ -46,22 +46,23 @@ go build -o ~/bin/listen-killer ./cmd/listen-killer/
 
 ## Usage
 
-### Interactive TUI (default)
+### CLI / Scripting / Agent Mode (default)
 
 ```bash
-listen-killer          # launches the TUI dashboard
+listen-killer                                           # Markdown output
+listen-killer list                                      # Markdown output
+listen-killer list --output json                        # JSON output
+listen-killer list --output yaml                        # YAML output
+listen-killer list --output csv                         # CSV output
+listen-killer list --fields pid,name,port,cwd           # select columns
+listen-killer list --port 3000 --output json            # filter by port
+listen-killer list --name node --fields pid,port,cwd,cmdline
 ```
 
-### CLI / Scripting / Agent Mode
+### Interactive TUI
 
 ```bash
-listen-killer list --no-tui                              # table output
-listen-killer list --no-tui --output json                # JSON output
-listen-killer list --no-tui --output yaml                # YAML output
-listen-killer list --no-tui --output csv                 # CSV output
-listen-killer list --no-tui --fields pid,name,port,cwd   # select columns
-listen-killer list --no-tui --port 3000 --output json    # filter by port
-listen-killer list --no-tui --name node --fields pid,port,cwd,cmdline
+listen-killer tui       # launches the TUI dashboard
 ```
 
 ### Scriptable Kill Verb
@@ -118,21 +119,21 @@ Press `o` to open the selected listener in your default browser (`xdg-open` on L
 The same data is available as structured output via the Glazed command framework. The output includes the owning process, bind address, port, executable path, working directory (`cwd`), command line, uptime, CPU%, and memory usage:
 
 ```bash
-# Pretty table
-listen-killer list --no-tui
+# Markdown table (default)
+listen-killer list
 
 # JSON for scripting
-listen-killer list --no-tui --output json | jq '.[] | select(.port > 10000)'
+listen-killer list --output json | jq '.[] | select(.port > 10000)'
 
 # CSV for spreadsheets
-listen-killer list --no-tui --output csv
+listen-killer list --output csv
 
 # Custom columns
-listen-killer list --no-tui --fields pid,name,port,cwd,cmdline,uptime,rss_human
+listen-killer list --fields pid,name,port,cwd,cmdline,uptime,rss_human
 
 # Filters for scripts / agents
-listen-killer list --no-tui --port 5173 --output json
-listen-killer list --no-tui --name node --path my-project --fields pid,port,cwd,cmdline
+listen-killer list --port 5173 --output json
+listen-killer list --name node --path my-project --fields pid,port,cwd,cmdline
 ```
 
 ### Structured Kill Results
